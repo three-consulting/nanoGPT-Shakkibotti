@@ -7,6 +7,8 @@ from contextlib import nullcontext
 import torch
 import tiktoken
 from model import GPTConfig, GPT
+import chess
+import chess.pgn
 
 # -----------------------------------------------------------------------------
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
@@ -65,7 +67,7 @@ if load_meta:
     # TODO want to make this more general to arbitrary encoder/decoder schemes
     stoi, itos = meta['stoi'], meta['itos']
     encode = lambda s: [stoi[c] for c in s]
-    decode = lambda l: ''.join([itos[i] for i in l])
+    decode = lambda l: [itos[i] for i in l]
 else:
     # ok let's assume gpt-2 encodings by default
     print("No meta.pkl found, assuming GPT-2 encodings...")
@@ -85,5 +87,21 @@ with torch.no_grad():
     with ctx:
         for k in range(num_samples):
             y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-            print(decode(y[0].tolist()))
-            print('---------------')
+            game = chess.pgn.Game()
+            board = chess.Board()
+            game.headers["Event"] = "Example"
+            for move in decode(y[0].tolist())[1:]:
+                if move == "\n":
+                    break
+                try:
+                    legal_moves = list(board.legal_moves)
+                    uci = board.push_san(move).uci()
+                    mv = chess.Move.from_uci(uci)
+                    if mv in legal_moves:
+                        game.end().add_main_variation(mv)
+                except chess.IllegalMoveError:
+                    break
+                except chess.AmbiguousMoveError:
+                    break
+            print(game)
+                # node = game.add_variation(chess.Move.from_san(move))
