@@ -75,20 +75,42 @@ else:
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
     decode = lambda l: enc.decode(l)
 
-# encode the beginning of the prompt
+#encode the beginning of the prompt
 if start.startswith('FILE:'):
     with open(start[5:], 'r', encoding='utf-8') as f:
         start = f.read()
 
-#start_ids = [move for move in start.split(", ")]
-#start_ids = encode(start_ids)
-start = start[1:-1].split(", ")
-start_ids = encode(start)
+start_id = start[1:-1].strip().split(", ")
+start_ids = encode(start_id)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
+#if isinstance(start, list):
+ #   token = stoi[start]
+  #  x = (torch.tensor(token, dtype=torch.long, device=device)[None, ...])
+
+# Yksi token ei käy, pitäisi olla kaksi
 
 # run generation
+
 with torch.no_grad():
     with ctx:
-        y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-        print(decode(y[0].tolist())[len(start_ids)])
-            # node = game.add_variation(chess.Move.from_san(move))
+        for k in range(num_samples):
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            game = chess.pgn.Game()
+            board = chess.Board()
+            game.headers["Event"] = "Example"
+            for move in decode(y[0].tolist())[0:]:
+                if move == "\n":
+                    break
+                try:
+                    legal_moves = list(board.legal_moves)
+                    uci = board.push_san(move).uci()
+                    mv = chess.Move.from_uci(uci)
+                    if mv in legal_moves:
+                        game.end().add_main_variation(mv)
+                except chess.IllegalMoveError:
+                    break
+                except chess.AmbiguousMoveError:
+                    break
+            print(game)
+                # node = game.add_variation(chess.Move.from_san(move))
+

@@ -14,7 +14,7 @@ import chess.pgn
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
 out_dir = 'out' # ignored if init_from is not 'resume'
 start = "\n" # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
-num_samples = 10 # number of samples to draw
+num_samples = 1 # number of samples to draw
 max_new_tokens = 500 # number of tokens generated in each sample
 temperature = 0.8 # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
 top_k = 200 # retain only the top_k most likely tokens, clamp others to have 0 probability
@@ -75,20 +75,46 @@ else:
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
     decode = lambda l: enc.decode(l)
 
-# encode the beginning of the prompt
-if start.startswith('FILE:'):
-    with open(start[5:], 'r', encoding='utf-8') as f:
-        start = f.read()
+all_ids = []
 
-#start_ids = [move for move in start.split(", ")]
-#start_ids = encode(start_ids)
-start = start[1:-1].split(", ")
-start_ids = encode(start)
-x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
+while True:
+    with torch.no_grad():
+        with ctx:
+                start = input("Next move: ")
+                if start=="":
+                    break
+                start_ids = start.strip().split(", ")
+                start_ids = encode(start_ids)
+                # Tähän annetun tokenin tarkistus
+                [all_ids.append(id) for id in start_ids]
+                x = (torch.tensor(all_ids, dtype=torch.long, device=device)[None, ...])
+                y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+                all_ids.append(y[0][len(all_ids)].item())
+                game = chess.pgn.Game()
+                board = chess.Board()
+                game.headers["Event"] = "Example"
+                # all_ids = [255, 24, 789]
+                for move in decode(all_ids):
+                    if move == "\n":
+                        break
+                    try:
+                        legal_moves = list(board.legal_moves)
+                        uci = board.push_san(move).uci()
+                        mv = chess.Move.from_uci(uci)
+                        if mv in legal_moves:
+                            game.end().add_main_variation(mv)
+                    except chess.IllegalMoveError:
+                        all_ids.remove(stoi[move])
+                        print("Move not allowed, try again")
+                        #break
+                        # Pitäisi hypätä while-looppiin eikä for-looppiin?
+                    except chess.AmbiguousMoveError:
+                        all_ids.remove(stoi[move])
+                        print("Move not allowed, try again")
+                        #break
+                print(game)
 
-# run generation
-with torch.no_grad():
-    with ctx:
-        y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-        print(decode(y[0].tolist())[len(start_ids)])
-            # node = game.add_variation(chess.Move.from_san(move))
+# Jos käyttäjä antaa laittoman siirron, kysy uudestaan
+# Jos shakkibotti generoi väärän siirron, generoi uusi
+
+# Jos joku siirto on nyt väärin, niin ei hyväksy enää uusia siirtoja

@@ -12,8 +12,12 @@ import chess.pgn
 
 # -----------------------------------------------------------------------------
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
-out_dir = 'out' # ignored if init_from is not 'resume'
-start = "\n" # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
+out_dir = 'out-chess' # ignored if init_from is not 'resume'
+game_start = "\n" # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
+#
+    #Voisiko antaa start-parametriksi tokenit?
+#
+start = ["e4", "e5"]
 num_samples = 10 # number of samples to draw
 max_new_tokens = 500 # number of tokens generated in each sample
 temperature = 0.8 # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
@@ -22,7 +26,7 @@ seed = 1337
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
 compile = False # use PyTorch 2.0 to compile the model to be faster
-exec(open('configurator.py').read()) # overrides from command line or config file
+#exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
 
 torch.manual_seed(seed)
@@ -76,19 +80,65 @@ else:
     decode = lambda l: enc.decode(l)
 
 # encode the beginning of the prompt
-if start.startswith('FILE:'):
-    with open(start[5:], 'r', encoding='utf-8') as f:
-        start = f.read()
+#if start.startswith('FILE:'):
+ #   with open(start[5:], 'r', encoding='utf-8') as f:
+  #      start = f.read()
+#start_ids = encode(start)
+#x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
-#start_ids = [move for move in start.split(", ")]
-#start_ids = encode(start_ids)
-start = start[1:-1].split(", ")
-start_ids = encode(start)
-x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
+if isinstance(start, list):
+    tokens = encode(start)
+    x = (torch.tensor(tokens, dtype=torch.long, device=device)[None, ...])
 
 # run generation
+
 with torch.no_grad():
     with ctx:
         y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-        print(decode(y[0].tolist())[len(start_ids)])
-            # node = game.add_variation(chess.Move.from_san(move))
+        move = decode(y[0].tolist())[len(tokens)+1]
+        game = chess.pgn.Game()
+        board = chess.Board()
+        try:
+            uci = board.push_san(move).uci()
+            move = chess.Move.from_uci(uci)
+            legal_moves = list(board.legal_moves)
+            if move in legal_moves:
+                game.end().add_main_variation(move)
+        except chess.IllegalMoveError:
+            pass
+        except chess.AmbiguousMoveError:
+            pass
+        print(move)
+
+"""
+while True:
+    with torch.no_grad():
+        with ctx:
+                start = input("Next move: ")
+                if start=="":
+                    break
+                start_moves = start.strip().split(", ")
+                for move in start_moves:
+                    if move not in itos.values():
+                        pass #pitäisi hypätä pois ja kysyä siirtoa uudestaan
+                start_ids = encode(start_moves)
+                for start_id in start_ids:
+                    check = add_move_to_game(itos[start_id], "given")
+                    if check == "move not allowed":
+                        print("Move not allowed, try again")
+                        break
+                    elif check == "game over":
+                        pass
+                    elif check == "legal move":
+                        all_ids.append(start_id)
+                        x = (torch.tensor(all_ids, dtype=torch.long, device=device)[None, ...])
+                        while True:
+                            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+                            generated_token = y[0][len(all_ids)].item()
+                            check = add_move_to_game(itos[generated_token], "generated")
+                            if check == "legal move":
+                                # ei lisää nyt uutta generoitua tokenia
+                                all_ids.append(generated_token)
+                                break
+
+"""
