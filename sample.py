@@ -75,6 +75,82 @@ else:
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
     decode = lambda l: enc.decode(l)
 
+
+#Jos ei tarvitse tarkistaa annetun siirron laillisuutta:
+
+def validate_move(moves: list):
+    game = chess.pgn.Game()
+    board = chess.Board()
+    game.headers["Event"] = "Example"
+    for move in moves[:-1]:
+        uci = board.push_san(move).uci()
+        mv = chess.Move.from_uci(uci)
+        game.end().add_main_variation(mv)
+    try:
+        legal_moves = list(board.legal_moves)
+        uci = board.push_san(moves[-1]).uci()
+        mv = chess.Move.from_uci(uci)
+        if mv in legal_moves:
+            game.end().add_main_variation(mv)
+            return True
+    except:
+        return False
+
+def generate_move(moves: list):
+    while True:
+        x = (torch.tensor(moves, dtype=torch.long, device=device)[None, ...])
+        y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+        generated_token = y[0][len(moves)].item()
+        generated_move = itos[generated_token]
+        check = validate_moves(moves + [generated_move])
+        if check:
+            moves.append(generated_move)
+            return moves
+
+# ------------------------------------------
+
+def validate_moves(moves: list):
+    game = chess.pgn.Game()
+    board = chess.Board()
+    game.headers["Event"] = "Example"
+    for move in moves[:-1]:
+        uci = board.push_san(move).uci()
+        mv = chess.Move.from_uci(uci)
+        game.end().add_main_variation(mv)
+    try:
+        legal_moves = list(board.legal_moves)
+        uci = board.push_san(moves[-1]).uci()
+        mv = chess.Move.from_uci(uci)
+        if mv in legal_moves:
+            game.end().add_main_variation(mv)
+            return "legal move"
+    except chess.IllegalMoveError:
+        return "move not allowed"
+    except chess.AmbiguousMoveError:
+        return "move not allowed"
+
+def generate_game(moves: list):
+    last_move = moves[-1]
+    if last_move not in stoi.keys():
+        print("Invalid move, try again")
+        pass
+    move_id = stoi[last_move]
+    check = validate_moves(moves)
+    if check == "move not allowed":
+        print("Move not allowed, try again")
+        pass
+    elif check == "legal move":
+        while True:
+            x = (torch.tensor(moves, dtype=torch.long, device=device)[None, ...])
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            generated_token = y[0][len(moves)].item()
+            check = validate_moves(moves + [itos[generated_token]])
+            if check == "legal move":
+                moves.append(itos[generated_token])
+                return moves
+
+
+"""
 game = chess.pgn.Game()
 board = chess.Board()
 game.headers["Event"] = "Example"
@@ -88,20 +164,19 @@ def add_move_to_game(gamemove, status):
         mv = chess.Move.from_uci(uci)
         if mv in legal_moves:
             game.end().add_main_variation(mv)
-            if status == "generated":
-                print(game)
             return "legal move"
     except chess.IllegalMoveError:
         return "move not allowed"
     except chess.AmbiguousMoveError:
         return "move not allowed"
 
-exit_game = False
+
 all_ids = []
 
 while True:
     with torch.no_grad():
         with ctx:
+                # Haetaan uusi siirto käyttäjältä
                 start = input("Next move: ")
                 if start == "":
                     break
@@ -129,4 +204,7 @@ while True:
                             check = add_move_to_game(itos[generated_token], "generated")
                             if check == "legal move":
                                 all_ids.append(generated_token)
+                                # Tässä lähetetään pelin siirrot eli all_ids? Dekoodataan ensin
+                                # all_moves = decode(all_ids)
                                 break
+"""
